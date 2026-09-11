@@ -59,7 +59,7 @@ Currently learning and improving:
 
 **Español 🇪🇸 · Français 🇫🇷 · العربية**
 
-Language learning is one of my favorite ways of understanding the world and connecting with people beyond the part of it I grew up in.
+Language learning is my favorite way of understanding the world and connecting with people beyond the part of it I grew up in.
 
 ## 👩🏻‍🔬 Outside code
 

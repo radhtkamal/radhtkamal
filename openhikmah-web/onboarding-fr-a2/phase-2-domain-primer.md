@@ -1,68 +1,155 @@
 # Phase 2 — Introduction au domaine
 
-> **Prérequis :** [Phase 1 — Qu'est-ce qu'OpenHikmah ?](./phase-1-what-is-openhikmah.md)  
-> **Tags de preuve :** **FACT** · **INFERENCE** · **UNKNOWN**
-
-La Phase 2 relie les concepts Coran/IA/recherche aux **modules réels d'OpenHikmah**. Ce n'est pas un cours général sur les *embeddings* ou la morphologie arabe — chaque section finit par *où dans ce dépôt* le concept vit.
+> **Prérequis :** Phase 1 — Qu’est-ce qu’OpenHikmah ?
+>
+> **Tags de preuve :**
+>
+> * **FACT** = l’information est visible dans le dépôt.
+> * **INFERENCE** = c’est une interprétation logique.
+> * **UNKNOWN** = l’information n’est pas encore vérifiée.
 
 ---
 
-## Cadre narratif
+## 1. Le but de cette phase
 
-Avant de suivre le code du canvas, gardez ce pipeline en tête :
+La Phase 1 a présenté l’idée principale :
+
+> Les données découvrent les versets.
+> L’IA choisit et explique.
+
+La Phase 2 présente maintenant les données utilisées par OpenHikmah.
+
+Après cette phase, vous devez comprendre :
+
+* comment OpenHikmah identifie un verset ;
+* où le texte du Coran est stocké ;
+* comment la recherche fonctionne ;
+* comment les racines arabes trouvent des connexions ;
+* comment les embeddings cherchent par le sens ;
+* pourquoi un verset et un nœud du canvas ont deux identités différentes.
+
+Vous n’avez pas encore besoin de suivre tout le chemin d’une requête dans le code. Ce parcours complet viendra dans la phase sur le runtime.
+
+---
+
+## 2. Vue générale des données
+
+Avant que l’utilisateur ouvre l’application, des scripts préparent les données.
+
+Ils ajoutent dans PostgreSQL :
+
+* les versets ;
+* la morphologie arabe ;
+* les embeddings.
+
+Quand l’application fonctionne, elle lit ces données pour faire la recherche et trouver des connexions.
 
 ```mermaid
-flowchart LR
-  subgraph ingest ["Seeding unique / hors ligne"]
-    SQ[seed-quran.mjs] --> V[(verses)]
-    SM[seed-morphology.mjs] --> WM[(word_morphology)]
-    EC[embed-corpus.mjs] --> VE[(verse_embeddings)]
-  end
+flowchart TB
+  A["Scripts de préparation"]
+  B["Versets"]
+  C["Morphologie arabe"]
+  D["Embeddings"]
+  E["Recherche et découverte"]
+  F["Canvas"]
 
-  subgraph runtime ["Runtime (en ligne)"]
-    V --> UI[Recherche + affichage canvas]
-    WM --> CD[connection-discovery]
-    VE --> SS[semantic-search]
-    CD --> GS[graph-service]
-    SS --> GS
-    GS --> CG[connection-generator + IA]
-    CG --> C[(connections)]
-    C --> Canvas[Liens canvas dans Zustand]
-  end
+  A --> B
+  A --> C
+  A --> D
+  B --> E
+  C --> E
+  D --> E
+  E --> F
 ```
 
-**À COMPRENDRE MAINTENANT :** Le texte sacré et les rails d'ancrage sont **insérés dans Postgres**. Les chemins runtime les **lisent** ; le LLM entre seulement après les candidats ou la validation du corpus.
+### Lecture à voix haute — suivez le diagramme
+
+Commencez en haut du diagramme.
+
+La première boîte représente les scripts de préparation.
+
+Trois flèches partent de cette boîte.
+
+La première flèche va vers les versets. La deuxième va vers la morphologie arabe. La troisième va vers les embeddings.
+
+Regardez maintenant les trois flèches qui descendent. Les versets, la morphologie et les embeddings arrivent tous dans le système de recherche et de découverte.
+
+Enfin, suivez la dernière flèche. Les résultats arrivent sur le canvas.
+
+Le diagramme montre donc deux moments : les données sont d’abord préparées, puis l’application les utilise pendant son fonctionnement.
+
+### À comprendre maintenant
+
+Les données principales existent dans PostgreSQL avant l’intervention de l’IA.
+
+Le système les lit pour trouver des versets candidats.
 
 ---
 
-## 1. Modèle de données du Coran
+# Partie A — Le modèle de données du Coran
 
-### Références sourate et ayah
+## 3. La référence d’un verset
 
-**FACT :** Un verset est identifié par une ref chaîne `"surah:ayah"` — par ex. `"2:255"` (Ayat al-Kursi).
+**FACT :** Chaque verset possède une référence sous cette forme :
 
-**FACT :** `isValidRef()` dans `lib/quran/quran-corpus.ts` impose :
+```text
+sourate:ayah
+```
 
-| Règle | Exemple |
-| --- | --- |
-| Format `^\d+:\d+$` seulement | `"2:255"` ✓ · `"02:255"` ✗ |
-| Sourate 1–114 | `"115:1"` ✗ |
-| Ayah dans le compte Hafs par sourate | `"1:8"` ✗ (Al-Fatiha a 7 ayahs) |
-| Orthographe canonique (pas de zéros en tête) | `"2:0255"` ✗ |
+Par exemple :
 
-**FACT :** Les **noms** de sourate ne sont pas stockés par ligne de verset. Ils sont dérivés à la lecture depuis `lib/quran/surah-names.ts` (commentaire `schema.ts` sur la table `verses`).
+```text
+2:255
+```
 
-**INFERENCE :** Pensez à `ref` comme une clé primaire stable — comme un ID de document Firestore que vous ne laissez pas les utilisateurs inventer, sauf que ici l'espace d'ID est limité par la structure du Coran.
+Cette référence identifie Ayat al-Kursi.
 
-### L'objet `Verse` (type application)
+Dans le code, la référence est souvent appelée `ref`.
 
-**FACT :** `types/quran.ts` :
+### Les règles de validation
+
+**FACT :** La fonction `isValidRef()` se trouve dans :
+
+```text
+lib/quran/quran-corpus.ts
+```
+
+Elle vérifie plusieurs règles.
+
+| Règle                                             | Exemple accepté | Exemple refusé |
+| ------------------------------------------------- | --------------: | -------------: |
+| Le format doit être `sourate:ayah`.               |         `2:255` |        `2-255` |
+| Le numéro de la sourate doit être entre 1 et 114. |         `114:1` |        `115:1` |
+| L’ayah doit exister dans la sourate.              |           `1:7` |          `1:8` |
+| Les nombres ne doivent pas commencer par zéro.    |         `2:255` |      `02:0255` |
+
+**FACT :** Les limites des ayahs utilisent les comptes Hafs/Uthmani.
+
+Une référence mal formée ne doit jamais devenir un résultat de recherche.
+
+### Comparaison avec Firestore
+
+**INFERENCE :** Vous pouvez penser à `ref` comme à un ID de document.
+
+Mais il existe une différence importante.
+
+Dans une application Firestore normale, votre application peut souvent créer de nouveaux IDs.
+
+Dans OpenHikmah, l’espace des références est déjà défini par la structure du Coran.
+
+L’application ne peut pas inventer une nouvelle sourate ou un nouvel ayah.
+
+---
+
+## 4. L’objet `Verse`
+
+**FACT :** Le fichier `types/quran.ts` définit l’objet utilisé par l’application :
 
 ```typescript
 interface Verse {
   surah: number;
   ayah: number;
-  ref: VerseRef;           // "2:255"
+  ref: VerseRef;
   arabicText: string;
   translation: string;
   surahName: string;
@@ -70,478 +157,716 @@ interface Verse {
 }
 ```
 
-C'est ce dans quoi les résultats de recherche, les nœuds canvas, et les payloads API sont hydratés.
+Chaque propriété a un rôle simple.
 
-### Corpus local vs fournisseurs distants
+| Propriété         | Signification                           |
+| ----------------- | --------------------------------------- |
+| `surah`           | Numéro de la sourate                    |
+| `ayah`            | Numéro de l’ayah                        |
+| `ref`             | Référence complète, par exemple `2:255` |
+| `arabicText`      | Texte arabe du verset                   |
+| `translation`     | Traduction choisie                      |
+| `surahName`       | Nom traduit de la sourate               |
+| `surahNameArabic` | Nom arabe de la sourate                 |
 
-OpenHikmah utilise une stratégie de données **à niveaux** :
+Cet objet est utilisé dans :
 
-| Couche | Source | Rôle |
-| --- | --- | --- |
-| **Primaire** | Postgres `verses` + `verse_translations` | Tout le texte affiché que l'app fait confiance au quotidien |
-| **Seeding** | Récupération Coran entier alquran.cloud | Population unique (`scripts/seed-quran.mjs`) |
-| **Recherche de secours** | API alquran.cloud par ayah | Quand la ligne locale manque (`lib/quran/verse-resolver.ts`) |
-| **Index recherche mot-clé** | quran.com `/api/v4/search` | Trouve des refs par texte ; résultats ré-hydratés depuis le corpus **local** |
-| **Localisation noms de sourate** | quran.com `/api/v4/chapters` | Élargit la correspondance de noms de sourate seulement (`lib/quran/chapters.ts`) |
+* les résultats de recherche ;
+* les réponses des APIs ;
+* les nœuds du canvas.
 
-**FACT :** `seed-quran.mjs` récupère :
+**FACT :** Le nom de la sourate n’est pas enregistré dans chaque ligne de la table `verses`.
 
-- Arabe : édition `quran-uthmani`
-- Traduction : `en.sahih` (Saheeh International)
-- Total attendu : **6236** ayahs
+Le système le trouve avec :
 
-**FACT :** Après le seeding, `lib/quran/quran-corpus.ts` sert le texte des versets depuis Postgres — *« Pure DB access: callers decide on any fallback. »*
-
-**FACT :** `resolveVerse()` essaie le corpus local d'abord ; en échec il log et passe à alquran.cloud en direct. Retourne **`null`** si la ref ne se résout nulle part — utilisé comme validation anti-hallucination.
-
-**FACT :** Route de recherche (`app/api/search/route.ts`) pour les requêtes en forme de ref :
-
-```typescript
-// A ref-shaped query that isn't a real verse ... is not a result —
-// never fabricate a verse card (AGENTS.md: no invented references).
-const verse = isValidRef(q) ? await resolveVerse(q, edition) : null;
+```text
+lib/quran/surah-names.ts
 ```
 
-Les hits mot-clé de quran.com sont aussi **ré-hydratés** via `getVerses()` pour que l'arabe/la traduction correspondent toujours au corpus local, pas au snippet quran.com.
-
-### Éditions de traduction
-
-**FACT :** Traduction par défaut par locale UI (`lib/i18n/config.ts`) :
-
-| Locale | Id édition |
-| --- | --- |
-| `en` | `en.sahih` |
-| `tr` | `tr.diyanet` |
-| `ru` | `ru.kuliev` |
-| `az` | `az.mammadaliyev` |
-
-**FACT :** La colonne `verses.translation` contient toujours `en.sahih`. Les autres éditions sont dans `verse_translations` (PK composite : `ref + edition`). Une ligne d'édition manquante retombe sur `en.sahih`.
-
-**FACT :** `AGENTS.md` — attribuer les traductions correctement ; Saheeh International depuis alquran.cloud.
-
-**FACT :** `isValidEdition()` met en liste blanche les valeurs cookie/query — les éditions non reconnues retombent au lieu d'être interpolées dans les URLs.
-
-### Modes de recherche (comment le produit mappe au code)
-
-| Intention utilisateur | Route / fonction | Ancrage |
-| --- | --- | --- |
-| Ref directe `2:255` | `GET /api/search?q=2:255` | `isValidRef` + `resolveVerse` |
-| Nom de sourate exact | même route | `matchSurahsByQuery` → payload `matchedSurahs` |
-| Mot-clé | même route → `keywordSearch()` | recherche quran.com → hydratation locale |
-| Lié par le sens (complémentaire) | même route page 1 → `relatedByMeaning()` | `searchByMeaning()` + pgvector |
-| Similaire à ce verset | `GET /api/verse/[s]/[a]/similar` | `similarVerses()` |
-
-**FACT :** Les correspondances sémantiques sur la recherche mot-clé sont **au mieux** et **complémentaires** — les échecs deviennent un tableau `related` vide, invisible pour l'utilisateur (`app/api/search/route.ts` commentaires).
-
-**INFERENCE :** La « recherche par le sens » du README est réalisée à la fois comme la section **Related by meaning** dans la recherche et comme **Similar verses** depuis la barre latérale du verset — pas forcément un bouton de mode séparé.
+Cela évite de répéter le même nom dans beaucoup de lignes.
 
 ---
 
-## 2. Ancrage linguistique arabe
+## 5. Le corpus local et les services externes
 
-### Concepts (minimum)
+OpenHikmah utilise plusieurs sources. Mais elles n’ont pas toutes le même rôle.
 
-| Terme | Signification dans ce dépôt |
-| --- | --- |
-| **Forme de surface** | Le mot tel qu'il apparaît dans le verset (avec diacritiques) |
-| **Racine** | Racine arabe trilittère (ou similaire) — ancre morphologique partagée |
-| **Lemme** | Forme de dictionnaire associée à un mot |
-| **Position** | Index du mot dans l'ayah |
+| Source                      | Rôle principal                              |
+| --------------------------- | ------------------------------------------- |
+| PostgreSQL                  | Source principale pour afficher les versets |
+| `alquran.cloud`             | Préparation initiale du corpus et secours   |
+| API de recherche Quran.com  | Recherche par mot-clé                       |
+| API des chapitres Quran.com | Recherche des noms de sourates              |
 
-**INFERENCE :** Les versets qui partagent une **racine** partagent souvent un ADN conceptuel même si les traductions anglaises diffèrent. C'est pourquoi « Par racine » est un mode de connexion principal.
+### Le corpus local
 
-### D'où viennent les données de morphologie
+**FACT :** Les tables principales sont :
 
-**FACT :** `scripts/seed-morphology.mjs` :
+* `verses` ;
+* `verse_translations`.
 
-- Lit les fichiers commités sous `data/morphology/*.jsonl`
-- Générés depuis un **serveur de morphologie coranique canonique** (`fetch_word_morphology` — selon commentaire du script)
-- Stocke **seulement les mots avec racine**
-- Upsert idempotent sur `(ref, position)`
+Le texte affiché par l’application vient normalement de ces tables.
 
-**FACT :** La couverture est **partielle par conception** — les versets sans lignes de morphologie retombent sur la génération IA **legacy** à la demande (`seed-morphology.mjs` en-tête).
+Le corpus local est donc la source principale du produit.
 
-### Comment fonctionne la correspondance de racines (déterministe)
+### La préparation initiale
 
-**FACT :** `lib/ai/connection-discovery.ts` → `rootCandidates()` :
+**FACT :** Le script suivant prépare le corpus :
 
-1. Sélectionne les racines distinctes pour la source `fromRef` depuis `word_morphology`
-2. Trouve d'autres refs partageant ces racines
-3. Classe par **nombre de racines partagées distinctes** (décroissant)
-4. Exclut la ref source et tout `excludeRefs` (pour « en avoir plus »)
+```text
+scripts/seed-quran.mjs
+```
 
-**FACT :** Aucun LLM dans cette étape.
+Il récupère :
 
-**FACT :** `lib/quran/arabic-morphology.ts` fournit la tokenisation **UI** — correspondance des tokens du verset aux surfaces de morphologie avec arabe normalisé (diacritiques retirés, variantes alif unifiées). Cela alimente le surlignage interactif des racines dans le texte du verset, séparé du SQL de découverte de connexions.
+* le texte arabe `quran-uthmani` ;
+* la traduction anglaise `en.sahih` de Saheeh International.
+
+Le total attendu est de **6 236 ayahs**.
+
+Après cette préparation, l’application peut lire les versets depuis PostgreSQL.
+
+### Le secours externe
+
+**FACT :** `resolveVerse()` cherche d’abord le verset dans le corpus local.
+
+Si le verset manque, la fonction essaie `alquran.cloud`.
+
+Si le verset reste introuvable, elle retourne :
+
+```typescript
+null
+```
+
+Ce `null` est important. Le système refuse de créer une fausse carte de verset.
+
+### La recherche Quran.com
+
+**FACT :** La recherche par mot-clé peut utiliser l’API de Quran.com pour trouver des références.
+
+Mais le texte final n’est pas pris directement dans le petit extrait retourné par la recherche.
+
+Le système utilise les références trouvées. Ensuite, il recharge les vrais objets `Verse` depuis le corpus local avec `getVerses()`.
+
+Cette opération est parfois appelée **hydratation**.
+
+Ici, hydrater signifie :
+
+> prendre une référence simple et charger toutes les données du verset.
 
 ```mermaid
 flowchart TB
-  SRC["Verset source 2:255"]
-  SRC --> WM[(word_morphology)]
-  WM --> R1["racines: ex. ك-ل-م …"]
-  R1 --> SQL["SQL: autres refs partageant racines"]
-  SQL --> CAND["~12 refs candidates classées par nb racines partagées"]
-  CAND --> AI["IA sélectionne ≤3 + écrit raisons"]
+  A["Mot-clé de l’utilisateur"]
+  B["Quran.com trouve des références"]
+  C["getVerses charge le corpus local"]
+  D["Objets Verse complets"]
+  E["Résultats affichés"]
+
+  A --> B
+  B --> C
+  C --> D
+  D --> E
 ```
 
-**À COMPRENDRE MAINTENANT :** Les connexions par racine sont du **SQL sur morphologie seedée**, pas la mémoire du modèle — quand les données existent.
+### Lecture à voix haute — suivez le diagramme
+
+Commencez avec la première boîte, en haut.
+
+L’utilisateur écrit un mot-clé.
+
+Suivez la première flèche. Quran.com cherche et retourne des références de versets.
+
+Continuez vers la boîte suivante. `getVerses` utilise ces références pour charger les données du corpus local.
+
+La flèche suivante mène vers les objets `Verse` complets. Ils contiennent le texte arabe, la traduction et les informations de la sourate.
+
+Enfin, la dernière flèche mène vers les résultats affichés.
+
+Le service externe aide donc à trouver les références, mais le corpus local fournit le contenu final.
 
 ---
 
-## 3. Récupération sémantique
+## 6. Les traductions
 
-### Ce qu'est un *embedding* *ici*
+**FACT :** La colonne `verses.translation` contient toujours la traduction anglaise :
 
-**FACT :** Chaque verset a un vecteur de **768 dimensions** dans `verse_embeddings.embedding` (`schema.ts`).
-
-**FACT :** Les vecteurs sont produits depuis le texte **`translation`** du verset (Saheeh anglais au moment du seed), via Gemini `gemini-embedding-001`, réduit à 768 dims avec `outputDimensionality` (`scripts/embed-corpus.mjs`, `.env.example`).
-
-**INFERENCE :** Le classement est **indexé sur le sens anglais** même quand l'UI montre une traduction turque/russe/azéri — la langue d'affichage et la langue de recherche diffèrent volontairement (`semantic-search.ts` commentaire sur `searchByMeaning`).
-
-### pgvector et similarité
-
-**FACT :** La définition de table inclut un index HNSW avec `vector_cosine_ops` :
-
-```typescript
-index("verse_embeddings_hnsw_idx").using("hnsw", t.embedding.op("vector_cosine_ops"))
+```text
+en.sahih
 ```
 
-**FACT :** `lib/quran/semantic-search.ts` calcule :
+Les autres traductions sont stockées dans :
 
-```typescript
-const similarity = sql`1 - (cosineDistance(verse_embeddings.embedding, queryVec))`;
-// ordered desc — higher = closer in meaning
+```text
+verse_translations
 ```
 
-Comparaison avec Firestore : vous pourriez indexer `where('tag', '==', 'patience')`. pgvector résout le **plus proche voisin dans l'espace du sens** — aucun mot-clé commun requis.
+Une traduction est identifiée par deux informations :
 
-### Exemple conceptuel (ancré dans les chemins de code)
+* la référence du verset ;
+* l’édition de traduction.
 
-> L'utilisateur cherche : *« patience dans l'épreuve »*
+Les langues principales configurées sont :
 
-1. **FACT :** `searchByMeaning()` normalise la requête → `embedQueryCached()` → *embed* Gemini (ou hit cache Redis, TTL 7 jours).
-2. **FACT :** `nearest()` exécute la distance cosinus contre toutes les lignes `verse_embeddings`.
-3. **FACT :** Les refs du haut s'hydratent via `getVerses(refs, edition)` — l'utilisateur voit l'arabe + sa traduction choisie.
-4. **INFERENCE :** Les résultats peuvent inclure des versets dont la traduction anglaise ne contient jamais le mot « patience » mais qui sont proches sémantiquement dans l'espace d'embedding.
+| Langue de l’interface | Édition           |
+| --------------------- | ----------------- |
+| Anglais `en`          | `en.sahih`        |
+| Turc `tr`             | `tr.diyanet`      |
+| Russe `ru`            | `ru.kuliev`       |
+| Azéri `az`            | `az.mammadaliyev` |
 
-> L'utilisateur étend le verset `2:153` par **Thème**
+**FACT :** Si une traduction manque, le système peut utiliser `en.sahih`.
 
-1. **FACT :** `semanticCandidates("2:153")` → `similarVerses()` charge le vecteur stocké de cette ref → voisins les plus proches (excluant soi + `excludeRefs`).
-2. **FACT :** Ces refs deviennent la liste autorisée de l'IA pour la génération thématique ancrée.
+**FACT :** `isValidEdition()` vérifie que l’édition demandée est autorisée.
 
-### Ce qui est persisté vs calculé en direct
+Le système ne place donc pas directement une valeur inconnue dans une URL externe.
 
-| Donnée | Persisté ? | Où |
-| --- | --- | --- |
-| Texte des versets | Oui | `verses`, `verse_translations` |
-| *Embedding* par verset | Oui | `verse_embeddings` (script hors ligne) |
-| *Embedding* de requête | Mis en cache optionnellement | Clé Redis `emb:q:<sha256>` |
-| Classement de similarité | Calculé par requête | SQL sur pgvector |
-| Raisons de connexion | Oui | `connections.reason` |
+### À comprendre maintenant
 
-**FACT :** `embed-corpus.mjs` est reprenable — saute les refs déjà embedées pour le modèle actuel.
+La langue affichée peut changer, mais la référence du verset reste la même.
+
+```text
+2:255
+```
+
+reste `2:255` en anglais, en turc, en russe ou en azéri.
 
 ---
 
-## 4. Concepts du graphe de connaissances
+# Partie B — Les types de recherche
 
-### Nœud
+## 7. Comment un utilisateur peut-il chercher ?
 
-**Dans le graphe persistant :** une **ref de verset** (ex. `"2:255"`) — pas un id de nœud canvas.
+OpenHikmah possède plusieurs chemins de recherche.
 
-**Sur le canvas :** un nœud React Flow avec :
+| Intention de l’utilisateur     | Fonctionnement                                                       |
+| ------------------------------ | -------------------------------------------------------------------- |
+| Chercher `2:255`               | Valider la référence, puis charger le verset                         |
+| Chercher un nom de sourate     | Trouver les sourates avec un nom correspondant                       |
+| Chercher un mot-clé            | Trouver des références avec Quran.com, puis charger le corpus local  |
+| Chercher par le sens           | Comparer un embedding de la question avec les embeddings des versets |
+| Trouver des versets similaires | Comparer l’embedding d’un verset avec les autres versets             |
 
-**FACT :** `store/canvas.ts` :
+**FACT :** La route principale est :
 
-- `id` : généré `node-${counter}` — **pas** la ref du verset (le même verset peut apparaître une fois selon la politique de position ; les doublons se lient via les liens)
-- `data` : objet `Verse` complet
-- `position` : coordonnées de mise en page `{ x, y }`
+```text
+GET /api/search
+```
 
-**INFERENCE :** **Identité** du verset = `ref`. **Identité** du nœud canvas = id opaque `node-N`.
+### Une référence qui ressemble à un verset
 
-### Lien / connexion
+Si l’utilisateur écrit une valeur comme `2:255`, le système la traite comme une référence possible.
 
-**Persisté (table `connections`) :**
+Mais si cette référence n’est pas valide, l’application ne crée pas de résultat.
 
-**FACT :** `schema.ts` :
+### Recherche par mot-clé et recherche par le sens
 
-| Colonne | Signification |
-| --- | --- |
-| `fromRef`, `toRef` | Paire de versets dirigée |
-| `kind` | `thematic` \| `root` \| `contrast` |
-| `reason` | Texte d'explication généré par l'IA |
-| `locale` | Langue de `reason` (`en` canonique) |
-| `model` | LLM qui a écrit cette ligne |
-| `status` | `active` \| `flagged` \| `retired` |
+Ces deux recherches sont différentes.
 
-Index unique sur `(fromRef, toRef, kind, locale)` — une ligne par lien typé dirigé par locale.
+Une recherche par mot-clé cherche des mots identiques ou proches.
 
-**Sur canvas (`SavedEdge` / `CanvasEdge`) :**
+Une recherche sémantique cherche une idée similaire.
 
-**FACT :** Stocke les **ids de nœuds** `source`/`target`, plus `kind`, `label`, `reason` dénormalisés pour le rendu — copiés depuis `ConnectionResult` API quand l'utilisateur étend.
+Par exemple, l’utilisateur peut écrire :
 
-### Graphe vs canvas — la séparation
+> patience pendant une épreuve
+
+Un verset pertinent peut apparaître même si sa traduction ne contient pas exactement le mot « patience ».
+
+---
+
+# Partie C — La morphologie arabe
+
+## 8. Les mots importants
+
+| Terme             | Explication simple                                 |
+| ----------------- | -------------------------------------------------- |
+| **Forme visible** | Le mot exactement comme il apparaît dans le verset |
+| **Racine**        | La base commune de plusieurs mots arabes           |
+| **Lemme**         | La forme principale d’un mot dans un dictionnaire  |
+| **Position**      | La place du mot dans l’ayah                        |
+| **Morphologie**   | L’étude de la forme et de la structure des mots    |
+
+Beaucoup de mots arabes utilisent une racine de trois lettres.
+
+Deux mots avec la même racine peuvent avoir des formes différentes.
+
+Ils peuvent aussi partager une idée importante.
+
+C’est pourquoi la racine est un type de connexion dans OpenHikmah.
+
+---
+
+## 9. D’où viennent les données de morphologie ?
+
+**FACT :** Le script suivant prépare les données :
+
+```text
+scripts/seed-morphology.mjs
+```
+
+Il lit des fichiers présents dans :
+
+```text
+data/morphology/*.jsonl
+```
+
+Selon les commentaires du script, ces fichiers viennent d’un serveur de morphologie coranique canonique.
+
+Le script garde seulement les mots qui possèdent une racine.
+
+Les données sont enregistrées dans :
+
+```text
+word_morphology
+```
+
+**FACT :** La couverture est partielle.
+
+Cela signifie que certains versets n’ont pas encore de données de morphologie.
+
+**UNKNOWN :** Le pourcentage exact de couverture n’est pas encore vérifié.
+
+---
+
+## 10. Comment le système trouve-t-il une connexion par racine ?
+
+**FACT :** La fonction `rootCandidates()` se trouve dans :
+
+```text
+lib/ai/connection-discovery.ts
+```
+
+Elle travaille en plusieurs étapes :
+
+1. elle lit les racines du verset de départ ;
+2. elle cherche d’autres versets avec les mêmes racines ;
+3. elle compte les racines communes ;
+4. elle place les meilleurs candidats en premier ;
+5. elle retire le verset de départ et les versets déjà affichés.
+
+Cette étape utilise SQL et `word_morphology`.
+
+Elle n’utilise pas un LLM.
 
 ```mermaid
 flowchart TB
-  subgraph pg ["PostgreSQL (vérité partagée)"]
-    CONN[(connections)]
-    COV[(connection_coverage)]
-  end
+  A["Verset de départ"]
+  B["Lire ses racines"]
+  C["Chercher les mêmes racines"]
+  D["Compter les racines communes"]
+  E["Classer les versets candidats"]
+  F["Donner la liste à l’IA"]
 
-  subgraph browser ["Session navigateur"]
-    ZS[store canvas Zustand]
-    RF[Rendu React Flow]
-  end
-
-  CONN -->|"GET cache hit / POST miss"| API["/api/connections"]
-  API -->|"ConnectionResult[]"| ZS
-  ZS --> RF
-  ZS -->|"serializeCanvas()"| SHARE["URL / JSON workspace"]
+  A --> B
+  B --> C
+  C --> D
+  D --> E
+  E --> F
 ```
 
-| | Graphe persistant | État canvas |
-| --- | --- | --- |
-| **Portée** | Global — tous les utilisateurs profitent du cache | Par session / partage / workspace |
-| **Identité** | Refs de versets | Ids de nœuds + mise en page |
-| **Liens** | Connexions canoniques pour `(fromRef, kind)` | Liens visuels entre nœuds placés |
-| **Survit au rafraîchissement** | Oui (Postgres) | Seulement si URL partagée ou workspace sauvegardé |
-| **Coût IA** | Payé une fois par cellule, puis gratuit | Le client re-récupère les lignes en cache |
+### Lecture à voix haute — suivez le diagramme
 
-**FACT :** `lib/ai/graph-service.ts` — *« Reads connections from Postgres; only on a miss does it call the AI, then writes the result back so every later reader gets it for free. »*
+Commencez en haut avec le verset de départ.
 
-**FACT :** Les canvas partagés stockent la mise en page sérialisée des nœuds/liens dans `shared_canvases.data` — la **mise en page d'exploration**, pas le cache global de connexions (Phase 8 ira plus loin).
+Suivez la première flèche. Le système lit les racines des mots de ce verset.
+
+Continuez vers la troisième boîte. Le système cherche d’autres versets avec les mêmes racines.
+
+Descendez encore. Il compte le nombre de racines communes pour chaque verset.
+
+La flèche suivante mène vers la liste classée. Les versets avec plus de racines communes arrivent en premier.
+
+Enfin, regardez la dernière flèche. La liste de candidats est donnée à l’IA.
+
+Le point important est visible dans l’ordre des boîtes : les données de morphologie trouvent et classent les candidats avant l’intervention de l’IA.
 
 ---
 
-## 5. Ancrage IA — le pipeline de connexion
+## 11. La morphologie dans l’interface
 
-Cette section est le détail opérationnel derrière la frontière de confiance de la Phase 1. Trace fichier par fichier → **Phase 7**.
+**FACT :** Le fichier suivant prépare aussi les mots pour l’interface :
 
-### Étape 0 — Ce qui démarre une requête
-
-**FACT :** L'utilisateur étend un nœud sur le canvas → `HikmahCanvas.tsx` `runExpansion()` → `POST /api/connections` avec :
-
-```json
-{
-  "fromRef": "2:255",
-  "kind": "thematic",
-  "arabicText": "...",
-  "translation": "...",
-  "excludeRefs": ["3:18", "..."]
-}
+```text
+lib/quran/arabic-morphology.ts
 ```
 
-**FACT :** `excludeRefs` = cibles déjà affichées pour ce nœud+kind (`getExpansionRefs`) — alimente **« en avoir plus »** sans répéter les liens.
+Il compare :
 
-### Étape 1 — Lecture du cache
+* les mots visibles dans le verset ;
+* les formes enregistrées dans les données de morphologie.
 
-**FACT :** `getConnections()` dans `graph-service.ts` lit les lignes `connections` actives pour `(fromRef, kind, locale)`, excluant `excludeRefs`.
+Pour faciliter la comparaison, le code normalise le texte arabe.
 
-**FACT :** Cache hit → hydrate via `resolveVerse(toRef)` → retour — **pas d'appel IA**.
+Par exemple, il peut :
 
-### Étape 2 — Découverte de candidats (déterministe)
+* retirer les signes diacritiques ;
+* traiter plusieurs formes de la lettre alif comme une forme commune.
 
-**FACT :** Sur miss, `discoverCandidates(fromRef, kind, limit≈12, excludeRefs)` :
+Cela permet de surligner les mots liés à une racine dans le texte du verset.
 
-| `kind` | Fonction de découverte |
-| --- | --- |
-| `root` | SQL sur `word_morphology` |
-| `thematic` | `semanticCandidates` → voisins pgvector |
-| `contrast` | Mêmes voisins que thématique |
+### Deux fonctions différentes
 
-**FACT :** Pour le contraste, la découverte **ne** lance **pas** un détecteur d'opposition séparé — les voisins sémantiques alimentent le pool ; l'IA sélectionne les vraiment contrastants (`connection-discovery.ts` commentaire).
+Il ne faut pas mélanger ces deux actions :
 
-**FACT :** Liste de candidats vide = soit pas de données seedées pour ce verset, soit pool épuisé (si `excludeRefs` non vide).
+* SQL trouve des versets avec des racines communes ;
+* le code de l’interface trouve les mots à surligner.
 
-### Étape 3 — Choix du chemin de génération
+Les deux utilisent les données de morphologie, mais ils n’ont pas le même travail.
 
-**FACT :** `generateConnectionsForCell()` :
+---
 
-```
-if candidates.length > 0
-  → generateGroundedConnections(candidates)   // préféré
-else if excludeRefs.length > 0
-  → return []                                 // « en avoir plus » épuisé
-else
-  → generateConnections()                     // secours legacy
-```
+# Partie D — Les embeddings et la recherche sémantique
 
-**INFERENCE :** Le chemin legacy seulement sur **premier** miss quand les tables d'ancrage sont vides — pas quand l'utilisateur demande plus et le pool est sec.
+## 12. Qu’est-ce qu’un embedding ici ?
 
-### Étape 4 — Ce que le LLM reçoit
+Un embedding est une liste de nombres qui représente le sens d’un texte.
 
-**Chemin ancré — FACT :** `SELECTION_FALLBACK_TEMPLATE` dans `connection-generator.ts` :
+**FACT :** Chaque verset possède un vecteur de **768 valeurs** dans :
 
-- Ref du verset source, arabe, traduction
-- **Liste numérotée de refs candidates + traductions**
-- Tâche : sélectionner jusqu'à 3, expliquer chacune
-- Règle : *« Choose ONLY from the candidate references listed above »*
-- Ajouté : `tanzihDirective()` + directive de langue locale optionnelle
-
-**Chemin legacy — FACT :** Le modèle doit trouver 3 versets de mémoire avec schéma de sortie JSON — toujours Maturidi/Hanafi + Tanzih.
-
-### Étape 5 — Schéma de sortie attendu
-
-**FACT :** Tableau JSON :
-
-```json
-[
-  { "ref": "3:18", "reason": "One concise theological sentence." }
-]
+```text
+verse_embeddings.embedding
 ```
 
-Parsé par `parseRawConnections()` — doit trouver `[...]` dans la réponse, types valides, `reason` non vide.
+Le script suivant crée ces embeddings :
 
-### Étape 6 — Validation post-génération
-
-| Vérification | Ancré | Legacy |
-| --- | --- | --- |
-| JSON analysable | lance `ConnectionParseError` | même |
-| `ref !== fromRef` | ✓ | ✓ |
-| `isValidRef(ref)` | ✓ (via ensemble autorisé) | ✓ filtre explicite |
-| Ref ∈ ensemble candidat | **`allowed.has(ref)`** | — |
-| Verset dans corpus local | hydratation `getVerses()` | `getVerses()` — supprime manquants |
-| Max 3 résultats | `.slice(0, 3)` | `.slice(0, 3)` |
-
-**FACT :** Filtre ancré :
-
-```typescript
-const allowed = new Set(candidates.map((v) => v.ref));
-const chosen = parseRawConnections(text)
-  .filter((c) => allowed.has(c.ref) && c.ref !== fromRef)
+```text
+scripts/embed-corpus.mjs
 ```
 
-### Étape 7 — Comportement en cas d'échec
+**FACT :** Il utilise :
 
-| Échec | Comportement |
-| --- | --- |
-| `ConnectionParseError` | **FACT :** la route API retourne 502 — échec de génération transitoire, pas pool vide |
-| `[]` vide bien formé | **FACT :** valide « rien d'approprié » — l'API retourne `[]`, le client affiche un avis |
-| Limite de débit | **FACT :** `RateLimitError` → 429 |
-| Ancrage manquant + legacy propose refs invalides | **FACT :** supprimés à l'hydratation corpus — peut donner moins de 3 ou `[]` |
-| Échec de log vers `ai_generations` | **FACT :** loggé en console ; la génération réussit quand même |
+```text
+gemini-embedding-001
+```
 
-**FACT :** `ConnectionParseError` ne doit **pas** être traité comme pool épuisé (`connection-generator.ts` doc de classe → `connection-batch.ts` s'appuie sur ceci).
+Le texte utilisé pendant cette préparation est la traduction anglaise `en.sahih`.
 
-### Étape 8 — Persistance et locale
+### Conséquence importante
 
-**FACT :** Génération anglaise réussie → `INSERT INTO connections ... ON CONFLICT DO NOTHING`.
+**INFERENCE :** Le classement sémantique utilise principalement le sens de la traduction anglaise.
 
-**FACT :** Locales non-`en` : **traduire** les chaînes `reason` anglaises — la sélection de versets n'est **jamais** re-dérivée par locale (`graph-service.ts` en-tête).
+L’interface peut afficher une traduction turque, russe ou azérie. Mais l’embedding du verset a été créé avec le texte anglais.
 
-**FACT :** Générations auditées dans `ai_generations` (fromRef, kind, model, tokens, promptVersion).
+La langue de l’affichage et la langue utilisée pour l’index sémantique peuvent donc être différentes.
 
-### Diagramme de confiance de bout en bout
+---
+
+## 13. Comment fonctionne la recherche par le sens ?
+
+Le système transforme la question de l’utilisateur en embedding.
+
+Ensuite, pgvector compare cet embedding avec les embeddings des versets.
+
+Il utilise la similarité cosinus.
+
+Vous n’avez pas besoin de calculer cette formule maintenant.
+
+Retenez seulement ceci :
+
+> plus deux vecteurs sont proches, plus leurs textes sont proches par le sens.
 
 ```mermaid
-sequenceDiagram
-  participant U as Utilisateur
-  participant C as Canvas
-  participant API as /api/connections
-  participant GS as graph-service
-  participant D as connection-discovery
-  participant AI as connection-generator
-  participant DB as Postgres
+flowchart TB
+  A["Question de l’utilisateur"]
+  B["Gemini crée un embedding"]
+  C["pgvector compare les vecteurs"]
+  D["Références les plus proches"]
+  E["getVerses charge les versets"]
+  F["Résultats avec arabe et traduction"]
 
-  U->>C: Étendre Thème sur 2:255
-  C->>API: POST + excludeRefs
-  API->>GS: getConnections()
-  GS->>DB: SELECT connections
-  alt cache hit
-    DB-->>GS: lignes
-    GS-->>API: ConnectionResult[]
-  else cache miss
-    GS->>D: discoverCandidates()
-    D->>DB: morphologie / pgvector
-    DB-->>D: refs candidates
-    D-->>GS: refs[]
-    GS->>AI: generateGroundedConnections()
-    AI-->>GS: résultats validés
-    GS->>DB: INSERT connections
-    GS-->>API: ConnectionResult[]
-  end
-  API-->>C: JSON
-  C->>C: ajouter nœuds + liens dans Zustand
+  A --> B
+  B --> C
+  C --> D
+  D --> E
+  E --> F
 ```
 
----
+### Lecture à voix haute — suivez le diagramme
 
-## 6. Résumé de provenance — qui décide quoi
+Commencez en haut avec la question de l’utilisateur.
 
-| Question | Décideur | Module |
-| --- | --- | --- |
-| `2:255` est syntaxiquement valide ? | Code | `isValidRef` |
-| Le texte arabe existe ? | Corpus seedé (+ API secours) | `quran-corpus`, `verse-resolver` |
-| Quelles refs sont candidats thématiques ? | Similarité pgvector | `semantic-search` |
-| Quelles refs sont candidats racine ? | SQL morphologie | `connection-discovery` |
-| Quelles 3 refs deviennent des liens ? | Sélection LLM (ancré) ou proposition (legacy) | `connection-generator` |
-| Pourquoi le lien est valide ? | `reason` LLM (prompt théologique + Tanzih) | `connection-generator` |
-| Ce lien réapparaîtra pour d'autres ? | Cache Postgres | `graph-service` |
+Suivez la première flèche. Gemini transforme la question en embedding, donc en liste de nombres.
 
----
+Continuez vers pgvector. La base de données compare ce nouveau vecteur avec les vecteurs déjà enregistrés pour les versets.
 
-## Phase 2 — Ce qu'il faut retenir
+La flèche suivante mène vers les références les plus proches par le sens.
 
-### À COMPRENDRE MAINTENANT
+Ensuite, `getVerses` utilise ces références pour charger les vrais objets `Verse`.
 
-1. Les **refs** sont `"surah:ayah"` avec validation stricte — les refs mal formées ne deviennent jamais des résultats.
-2. Le **corpus local** est autoritaire pour l'affichage ; les APIs externes sont des aides recherche/seed/secours.
-3. **Découverte racine = SQL sur `word_morphology`** ; **découverte thème/contraste = voisins pgvector**.
-4. Les **embeddings** sont construits depuis le texte de traduction anglais ; le classement sémantique est indexé anglais ; la traduction UI est séparée.
-5. **Graphe persistant** (`connections`) ≠ **mise en page canvas** (Zustand) — vérité partagée vs vue personnelle.
-6. **IA ancrée** ne peut choisir que parmi les candidats découverts ; **legacy** exige toujours l'hydratation du corpus.
+Enfin, la dernière boîte montre les résultats avec le texte arabe et la traduction choisie.
 
-### UTILE PLUS TARD
+Le diagramme sépare donc deux opérations : pgvector classe les références, puis le corpus local fournit le contenu affiché.
 
-- `connection_coverage.exhaustedAt` comptabilité admin pour le backfill
-- Économie du cache Redis d'embeddings de requête
-- Les Noms divins ont un *pattern* d'ancrage parallèle (`name_content`, quran.com search d'abord) — sous-système différent
-- Réglage index HNSW, historique des migrations
+### Comparaison avec Firestore
 
-### IGNORER POUR L'INSTANT
+Dans Firestore, vous pouvez faire une recherche exacte comme :
 
-- Tables social/challenge
-- Mécanique admin des overrides `prompt_versions`
-- Audio `SURAH_LENGTHS` sauf comme utilisé par `isValidRef`
+```typescript
+where("tag", "==", "patience")
+```
+
+Cette requête cherche une valeur précise.
+
+Avec pgvector, le système cherche les éléments les plus proches dans un espace de sens.
+
+Les résultats n’ont donc pas besoin de contenir le même mot.
 
 ---
 
-## Incertitudes
+## 14. Recherche et connexion thématique
 
-| Sujet | Statut |
-| --- | --- |
-| Pourcentage exact de couverture morphologie dans `data/morphology/` | **UNKNOWN** jusqu'à inspection du répertoire data ou rapport admin coverage |
-| L'UI expose-t-elle une recherche purement sémantique séparée du mot-clé | **INFERENCE :** surtout « Related by meaning » + API verset similaire, pas un flag de mode dédié |
-| Rôle de l'API Quran Foundation au-delà auth/favoris | **UNKNOWN** — Phase 9/10 |
-| Fréquence production legacy vs ancré | **INFERENCE :** ancré quand embeddings/morphologie existent pour le verset |
+La recherche sémantique sert à deux choses principales.
+
+### Chercher avec une phrase
+
+L’utilisateur décrit une idée.
+
+Le système retourne des versets proches par le sens.
+
+### Étendre un verset
+
+Quand l’utilisateur demande une connexion par thème, le système cherche les embeddings les plus proches du verset de départ.
+
+Ces versets deviennent des candidats.
+
+Dans le chemin ancré, l’IA choisit seulement parmi ces candidats et écrit les raisons.
+
+Pour une connexion par contraste, le système utilise aussi des voisins sémantiques comme candidats. Ensuite, l’IA cherche les vraies oppositions dans cette liste.
+
+Le détail complet de cette sélection appartient à la phase sur l’IA et le runtime.
 
 ---
 
-## Et ensuite
+# Partie E — Le graphe et le canvas
 
-**Phase 3 — Frontières théologiques et données sacrées :** où Maturidi/Hanafi, Tanzih, vérification des versets, fixtures de test, et exigences de divulgation PR sont encodés comme contraintes logicielles — la carte de *ce que vous ne devez jamais « corriger » à la légère*.
+## 15. Deux types d’identité
 
-Dites **« continue vers la Phase 3 »** quand vous êtes prêt.
+Le verset et le nœud du canvas ne possèdent pas la même identité.
 
-> **Version complète (français B2+) :** [Phase 2](../onboarding-fr/phase-2-domain-primer.md)
+### Identité du verset
+
+La référence identifie le verset :
+
+```text
+2:255
+```
+
+Cette identité appartient au domaine du Coran.
+
+### Identité du nœud
+
+**FACT :** Dans `store/canvas.ts`, un nœud possède un ID similaire à :
+
+```text
+node-1
+```
+
+Il possède aussi :
+
+* un objet `Verse` dans `data` ;
+* une position `{ x, y }`.
+
+Cet ID identifie un élément visuel sur le canvas.
+
+### Modèle mental
+
+> `2:255` répond à la question : « Quel verset est-ce ? »
+> `node-1` répond à la question : « Quel élément du canvas est-ce ? »
+
+Cette différence ressemble à la différence entre :
+
+* l’ID d’une entité métier ;
+* l’ID d’une représentation dans l’interface.
 
 ---
 
-## Fichiers clés (liste de lecture Phase 2)
+## 16. Connexion persistante et lien visuel
 
-| Fichier | Sujet |
-| --- | --- |
-| `lib/quran/quran-corpus.ts` | Validation ref, corpus local |
-| `lib/quran/verse-resolver.ts` | Corpus + secours en direct |
-| `app/api/search/route.ts` | Modes de recherche |
-| `lib/quran/semantic-search.ts` | Embeddings, requêtes pgvector |
-| `lib/ai/connection-discovery.ts` | Candidats racine + sémantiques |
-| `lib/ai/connection-generator.ts` | Prompts IA, parsing, validation |
-| `lib/ai/graph-service.ts` | Cache, chemin miss, persistance |
-| `lib/infra/db/schema.ts` | `verses`, `connections`, `word_morphology`, `verse_embeddings` |
-| `scripts/seed-quran.mjs` | Provenance corpus |
-| `scripts/seed-morphology.mjs` | Provenance morphologie |
-| `scripts/embed-corpus.mjs` | Provenance embeddings |
-| `store/canvas.ts` | Types canvas vs graphe |
-| `types/quran.ts` | Types de domaine partagés |
+Une connexion dans PostgreSQL utilise les références des versets.
+
+Elle peut contenir :
+
+* `fromRef` ;
+* `toRef` ;
+* `kind` ;
+* `reason` ;
+* `locale` ;
+* `model` ;
+* `status`.
+
+Un lien sur le canvas utilise les IDs des nœuds :
+
+* `source` ;
+* `target`.
+
+Il garde aussi les informations nécessaires pour l’affichage, comme :
+
+* le type ;
+* le label ;
+* la raison.
+
+```mermaid
+flowchart TB
+  A["PostgreSQL : 2:255 vers 3:18"]
+  B["API : ConnectionResult"]
+  C["Zustand : node-1 vers node-2"]
+  D["React Flow affiche le lien"]
+  E["Partage : URL ou workspace"]
+
+  A --> B
+  B --> C
+  C --> D
+  C --> E
+```
+
+### Lecture à voix haute — suivez le diagramme
+
+Commencez en haut avec PostgreSQL.
+
+La connexion enregistrée utilise les références des versets, par exemple `2:255` vers `3:18`.
+
+Suivez la première flèche. L’API transforme cette connexion en `ConnectionResult`.
+
+Continuez vers Zustand. Le store du canvas travaille maintenant avec des IDs visuels, par exemple `node-1` vers `node-2`.
+
+À partir de Zustand, le diagramme se sépare en deux chemins.
+
+Suivez d’abord la flèche vers React Flow. React Flow utilise l’état pour afficher le lien à l’écran.
+
+Revenez ensuite à Zustand et suivez l’autre flèche. Le même état peut être transformé pour créer une URL partagée ou enregistrer un workspace.
+
+Le diagramme montre donc le passage entre deux mondes : PostgreSQL connaît les références des versets, tandis que le canvas connaît les IDs et les positions des éléments visuels.
+
+---
+
+## 17. Vérité partagée et vue personnelle
+
+| Question                        | Graphe persistant     | Canvas                                   |
+| ------------------------------- | --------------------- | ---------------------------------------- |
+| Où vit-il ?                     | PostgreSQL            | Zustand dans le navigateur               |
+| Quelle identité utilise-t-il ?  | Références de versets | IDs de nœuds                             |
+| Que contient-il ?               | Connexions et raisons | Nœuds, liens et positions                |
+| Qui peut en profiter ?          | Tous les utilisateurs | La session ou le workspace               |
+| Survit-il au rafraîchissement ? | Oui                   | Seulement s’il est partagé ou enregistré |
+
+**FACT :** `graph-service.ts` lit d’abord les connexions déjà présentes dans PostgreSQL.
+
+Si une connexion existe déjà, un autre utilisateur peut recevoir le même résultat sans demander une nouvelle génération à l’IA.
+
+Le canvas garde seulement la vue de travail de l’utilisateur.
+
+---
+
+# Partie F — Qui décide quoi ?
+
+## 18. La provenance des décisions
+
+| Question                                         | Système responsable                        |
+| ------------------------------------------------ | ------------------------------------------ |
+| La référence `2:255` a-t-elle un format valide ? | `isValidRef()`                             |
+| Le verset existe-t-il ?                          | Corpus local, puis secours externe         |
+| Quel texte arabe faut-il afficher ?              | Corpus local                               |
+| Quelle traduction faut-il afficher ?             | Édition choisie, avec secours anglais      |
+| Quels versets partagent une racine ?             | SQL sur `word_morphology`                  |
+| Quels versets sont proches par le sens ?         | Embeddings et pgvector                     |
+| Quels candidats deviennent des connexions ?      | IA limitée à la liste dans le chemin ancré |
+| Pourquoi les versets sont-ils connectés ?        | `reason` écrite par l’IA                   |
+| Où la connexion est-elle gardée ?                | PostgreSQL                                 |
+| Où la position du nœud est-elle gardée ?         | État du canvas                             |
+
+Ce tableau montre que l’IA ne décide pas de tout.
+
+Chaque partie du système possède une responsabilité précise.
+
+---
+
+# Phase 2 — Ce qu’il faut retenir
+
+1. Une référence utilise le format `sourate:ayah`.
+
+2. `isValidRef()` vérifie le format et les limites réelles du Coran.
+
+3. PostgreSQL est la source principale pour le texte affiché.
+
+4. Les services externes aident à préparer, chercher ou récupérer une donnée manquante.
+
+5. La recherche par racine utilise SQL et `word_morphology`.
+
+6. La recherche par le sens utilise des embeddings et pgvector.
+
+7. Les embeddings des versets sont créés avec la traduction anglaise `en.sahih`.
+
+8. La référence identifie le verset. L’ID `node-N` identifie sa représentation sur le canvas.
+
+9. Le graphe persistant contient la vérité partagée. Le canvas contient la vue de travail de l’utilisateur.
+
+10. Les données trouvent les candidats avant que l’IA choisisse et explique.
+
+---
+
+## Détails volontairement reportés
+
+Vous n’avez pas encore besoin de comprendre :
+
+* l’index HNSW de pgvector ;
+* la formule complète de la similarité cosinus ;
+* le cache Redis des requêtes ;
+* le chemin complet de `POST /api/connections` ;
+* les erreurs HTTP 429 et 502 ;
+* `ConnectionParseError` ;
+* le format complet des prompts ;
+* tous les cas du chemin *legacy* ;
+* l’enregistrement dans `ai_generations` ;
+* le système administratif de *backfill* ;
+* les tables sociales et les défis.
+
+Ces sujets sont réels, mais ils ne sont pas nécessaires pour le modèle mental de la Phase 2.
+
+---
+
+## Vocabulaire essentiel
+
+| Mot             | Explication simple                                         |
+| --------------- | ---------------------------------------------------------- |
+| **ayah**        | Un verset du Coran                                         |
+| **sourate**     | Un chapitre du Coran                                       |
+| **ref**         | La référence d’un verset, comme `2:255`                    |
+| **corpus**      | La collection locale des versets                           |
+| **édition**     | Une version précise d’une traduction                       |
+| **hydrater**    | Charger les données complètes à partir d’une référence     |
+| **morphologie** | Étude de la structure des mots                             |
+| **racine**      | Base commune de plusieurs mots arabes                      |
+| **lemme**       | Forme principale d’un mot dans un dictionnaire             |
+| **embedding**   | Liste de nombres qui représente le sens                    |
+| **vecteur**     | Liste ordonnée de nombres                                  |
+| **similarité**  | Mesure de proximité entre deux éléments                    |
+| **pgvector**    | Extension PostgreSQL pour stocker et comparer des vecteurs |
+| **persistant**  | Enregistré pour rester disponible                          |
+| **runtime**     | Moment où l’application fonctionne                         |
+| **seeding**     | Préparation initiale des données                           |
+| **nœud**        | Élément visuel placé sur le canvas                         |
+| **provenance**  | Source d’une information ou d’une décision                 |
+
+---
+
+## Fichiers importants pour vérifier cette phase
+
+Vous n’avez pas besoin de lire tous ces fichiers maintenant.
+
+| Fichier                          | Sujet                                     |
+| -------------------------------- | ----------------------------------------- |
+| `types/quran.ts`                 | Objet `Verse` et types du domaine         |
+| `lib/quran/quran-corpus.ts`      | Validation des références et corpus local |
+| `lib/quran/verse-resolver.ts`    | Corpus local et secours externe           |
+| `lib/quran/surah-names.ts`       | Noms des sourates                         |
+| `lib/i18n/config.ts`             | Éditions utilisées selon la langue        |
+| `app/api/search/route.ts`        | Chemins de recherche                      |
+| `lib/quran/semantic-search.ts`   | Embeddings et pgvector                    |
+| `lib/quran/arabic-morphology.ts` | Morphologie utilisée dans l’interface     |
+| `lib/ai/connection-discovery.ts` | Candidats par racine et par sens          |
+| `lib/infra/db/schema.ts`         | Tables de la base de données              |
+| `scripts/seed-quran.mjs`         | Préparation du corpus                     |
+| `scripts/seed-morphology.mjs`    | Préparation de la morphologie             |
+| `scripts/embed-corpus.mjs`       | Création des embeddings                   |
+| `store/canvas.ts`                | Identité et état des nœuds du canvas      |
+| `lib/ai/graph-service.ts`        | Connexions persistantes                   |

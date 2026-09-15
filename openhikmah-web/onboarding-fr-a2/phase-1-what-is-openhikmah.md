@@ -1,363 +1,477 @@
-# Phase 1 — Qu'est-ce qu'OpenHikmah ?
+# Phase 1 — Qu’est-ce qu’OpenHikmah ?
 
-> **Statut :** Onboarding en lecture seule · dérivé des docs et du code du dépôt  
-> **Tags de preuve :** **FACT** = montré dans le dépôt · **INFERENCE** = interprétation raisonnable · **UNKNOWN** = pas encore vérifié
-
----
-
-## Avant le code : une phrase
-
-**FACT :** Open Hikmah est un graphe de connaissances du Coran *ancré dans l'IA* (*AI-grounded*) — vous cherchez un verset, vous le placez sur un *canvas* (surface de travail infinie), vous l'étendez pour voir des versets liés, et vous lisez des explications écrites par l'IA sur *pourquoi* ces liens existent.
-
-Ce mot — **ancré** (*grounded*) — est le pari central du produit. Il touche à l'ingénierie et à la théologie.
+> **Statut :** onboarding en lecture seule
+>
+> **Tags de preuve :**
+>
+> * **FACT** = l’information est visible dans le dépôt.
+> * **INFERENCE** = c’est une interprétation logique.
+> * **UNKNOWN** = l’information n’est pas encore vérifiée.
 
 ---
 
-## Ce qu'est OpenHikmah
+## 1. OpenHikmah en une phrase
 
-**FACT :** Le README décrit Open Hikmah comme un outil pour explorer le Coran comme un **graphe connecté**. Ce n'est pas une lecture linéaire, page par page.
+**FACT :** OpenHikmah est un outil pour explorer les connexions entre les versets du Coran.
 
-**FACT :** La page d'accueil (`app/page.tsx`) dit : *« Search any verse and map its connections — shared roots, themes, and contrasts — grounded in canonical Qur'an data. »*
+Vous cherchez un verset. Vous l’ajoutez à un *canvas*. Ensuite, l’application montre d’autres versets liés.
 
-**INFERENCE :** « Hikmah » (حكمة, sagesse) veut dire ici une connaissance structurée et exploratoire. Ce n'est pas un chatbot qui parle librement du Coran. Le produit ressemble plus à une carte d'étude interactive qu'à un assistant IA générique.
+L’IA explique pourquoi les versets sont connectés.
 
-### Boucle principale (modèle mental du produit)
-
-```mermaid
-flowchart LR
-  A[Trouver un verset] --> B[Placer sur le canvas]
-  B --> C[Étendre par Thème / Racine / Contraste]
-  C --> D[Voir versets liés + explications]
-  D --> B
-```
-
-1. **Trouver un verset** — par référence (`2:255`), par mot-clé, ou par le sens en langue naturelle.
-2. **Le placer sur le canvas** — un espace de graphe infini (`@xyflow/react`).
-3. **Étendre un nœud** — choisir un *mode* de connexion (thème, racine de mot, ou contraste).
-4. **Recevoir des liens ancrés** — les versets cibles viennent d'abord de données déterministes ; l'IA explique le lien.
-5. **Continuer à explorer** — partager le canvas par URL, marquer des versets, se connecter pour la synchronisation.
-
-**À COMPRENDRE MAINTENANT :** Le canvas est la surface principale pour comprendre. La recherche vous fait entrer ; le graphe est où la compréhension s'accumule.
-
-**UTILE PLUS TARD :** Noms divins (`/names`), Récits prophétiques, séries sociales/défis, espaces de travail, lecture audio, localisation — ce sont des fonctionnalités réelles, mais pas nécessaires pour comprendre le modèle de confiance central.
-
-**IGNORER POUR L'INSTANT :** Outils admin de remplissage (*backfill*), détails internes du cache Redis, détails PKCE OAuth.
+OpenHikmah n’est donc pas un chatbot qui parle librement du Coran. Il ressemble plutôt à une carte interactive pour étudier le Coran.
 
 ---
 
-## Pour qui c'est fait
-
-**FACT :** L'accès invité est possible — vous pouvez explorer, marquer des versets localement, et utiliser le canvas sans compte (README Features).
-
-**FACT :** Les utilisateurs connectés (via Quran Foundation OAuth2 PKCE) ont des favoris sur plusieurs appareils, des espaces de travail nommés, des fonctions sociales, et des @mentions.
-
-**INFERENCE :** Le public visé : musulmans et étudiants du Coran qui veulent une exploration *relationnelle* — comment les versets se répondent, contrastent, ou partagent une racine linguistique — pas seulement une recherche. L'interface et les textes supposent le respect du texte sacré (voir `DESIGN.md` : les explications IA ne doivent jamais ressembler au texte coranique).
-
----
-
-## Quel problème ça résout
-
-### Lecture linéaire vs compréhension relationnelle
-
-**INFERENCE :** La lecture traditionnelle suit l'ordre sourate/ayah. Les liens théologiques et linguistiques traversent cet ordre : la même racine arabe apparaît dans des sourates éloignées ; les thèmes reviennent ; certains ayahs contrastent d'autres (facilité/difficulté, gratitude/ingratitude).
-
-OpenHikmah fait de ces relations entre versets des **objets navigables** — pas des choses qu'il faut déjà connaître ou chercher manuellement.
-
-### Pourquoi la recherche par mot-clé ne suffit pas
-
-**FACT :** L'app supporte la recherche par référence directe et par mot-clé (`README.md` Features).
-
-**INFERENCE :** La recherche par mot-clé échoue quand :
-
-- Vous connaissez l'*idée* mais pas les mots (« versets sur la patience dans l'épreuve »).
-- Les versets liés utilisent un vocabulaire différent, relié seulement par le sens ou la morphologie arabe.
-- Vous voulez des relations de *contraste*, pas de similarité.
-
-**FACT :** La **recherche sémantique par le sens** est une fonctionnalité principale — vous décrivez un concept avec vos mots et vous trouvez des versets pertinents même sans mots communs (`README.md` Overview).
-
-Cela nécessite des *embeddings* (vecteurs numériques qui représentent le sens) + similarité vectorielle (PostgreSQL + pgvector + *embeddings* Gemini selon README Tech Stack) — un problème de recherche différent d'une correspondance exacte. *(Mécaniques détaillées : Phase 2 et Phase 9.)*
-
----
-
-## Que veut dire « sens théologique » ici
-
-**FACT :** `CONTRIBUTING.md` appelle Open Hikmah un *« theological sensemaking tool for the Quran »* (outil de compréhension théologique du Coran).
-
-**FACT :** `AGENTS.md` lie tous les prompts IA et les connexions à la tradition **Maturidi/Hanafi** et exige un **Tanzih strict** — ne jamais suggérer une forme physique, un lieu spatial, ou une ressemblance pour les attributs divins.
-
-En termes produit, la compréhension théologique veut dire :
-
-| Échec d'une « app IA Coran » ordinaire | Comportement voulu d'OpenHikmah |
-| --- | --- |
-| Le modèle invente une référence de verset | Les refs cibles viennent du corpus / de la découverte d'abord ; les refs sont validées |
-| Le modèle présente des liens non prouvés comme des faits | Les extrémités du lien sont déterministes ; le modèle écrit la *raison* |
-| Le modèle dérive vers un cadre hétérodoxe | Les prompts encodent l'école + Tanzih ; les changements exigent une divulgation |
-
-**FACT :** `DESIGN.md` exige que le texte écrit par l'IA (raisons de connexion, réflexions) soit **visuellement distinct** du texte coranique canonique — note éditoriale avec bordure teal, jamais stylé comme un verset.
-
-**À COMPRENDRE MAINTENANT :** Comprendre = *exploration guidée avec garde-fous*, pas génération libre de contenu religieux.
-
----
-
-## Que veut dire « graphe de connaissances du Coran » ici
-
-**FACT :** Les connexions persistées sont dans PostgreSQL (`lib/ai/graph-service.ts` — *« The persistent knowledge graph. Reads connections from Postgres… »*).
-
-**FACT :** Trois types de liens existent (`types/quran.ts`) :
-
-| Type | Label produit (approx.) | Ce que ça connecte |
-| --- | --- | --- |
-| `thematic` | Thème | Versets partageant un thème théologique |
-| `root` | Racine de mot | Versets partageant une racine arabe significative |
-| `contrast` | Contraste | Versets présentant des concepts théologiques opposés |
-
-**FACT :** Chaque lien porte des métadonnées : `kind`, `label` lisible, et une chaîne `reason` générée par l'IA (`CanvasEdge.data` dans `types/quran.ts`).
-
-### Graphe vs canvas
-
-**INFERENCE :**
-
-- **Graphe de connaissances (persisté) :** `(fromRef, toRef, kind, reason, locale…)` — partagé, mis en cache, auditable.
-- **Canvas (session/UI) :** nœuds et liens React Flow — mise en page, sélection, état d'expansion, sérialisation pour partage — votre vue de travail du graphe.
-
-**FACT :** Les canvas partageables se sérialisent dans une URL (`README.md` Features ; `lib/canvas/share-canvas.ts` existe).
-
-Vous reviendrez sur cette séparation en Phase 8. Pour l'instant : **le graphe est la vérité de « quoi est connecté à quoi » ; le canvas est comment vous manipulez et partagez une vue.**
-
----
-
-## Ce que le canvas infini apporte
-
-**FACT :** Le canvas utilise `@xyflow/react` ; le style le traite comme un champ bleu marine plat où les nœuds sont séparés par bordure/surface, pas par élévation (`DESIGN.md`, README Tech Stack).
-
-**INFERENCE :** Le canvas compte parce que les relations coraniques sont **multiples et non linéaires**. Une liste de résultats de recherche ne peut pas montrer :
-
-- L'expansion parallèle d'un verset en trois modes (thème / racine / contraste)
-- Les chemins qui se croisent (verset A → B et A → C, puis B → D)
-- Le regroupement spatial que vous construisez en étudiant
-
-**FACT :** Les couleurs des liens sont réservées sémantiquement — thème teal, racine or, contraste rouge/ton erreur (`DESIGN.md`).
-
----
-
-## Racines arabes — pourquoi elles comptent (niveau produit)
-
-**FACT :** Les connexions peuvent être ancrées dans la **morphologie canonique** — racines arabes partagées depuis les données `word_morphology` (`lib/ai/connection-discovery.ts`, README Tech Stack).
-
-**INFERENCE :** Les mots arabes viennent de racines trilittères (ou similaires). Les versets qui partagent une racine partagent souvent un ADN conceptuel même si les traductions anglaises semblent sans lien. C'est un signal linguistique **déterministe** — pas l'intuition d'un LLM.
-
-**FACT :** `lib/quran/arabic-morphology.ts` documente l'interactivité au niveau des mots : les entrées de morphologie relient les formes de surface aux racines pour le surlignage dans le verset.
-
-Détails de morphologie computationnelle → **Phase 2**. Pour la Phase 1 : **les racines sont l'un des deux grands rails d'ancrage avec les embeddings.**
-
----
-
-## Recherche sémantique — ce qu'elle ajoute (niveau produit)
-
-**FACT :** `lib/quran/semantic-search.ts` décrit la recherche sémantique :
-
-- Lit des vecteurs **précalculés** depuis `verse_embeddings` (remplis par `scripts/embed-corpus.mjs`)
-- Classe par **similarité cosinus** via pgvector
-- Alimente « recherche par le sens », « trouver des versets similaires », et **la récupération de candidats pour les connexions thématiques/contraste**
-
-Exemple conceptuel simple :
-
-> Requête utilisateur : *« gratitude quand les temps sont difficiles »*  
-> **FACT :** Le système *embed* la requête (Gemini), trouve les vecteurs de versets les plus proches dans Postgres, retourne des ayahs classés.  
-> **INFERENCE :** Aucun mot-clé anglais/arabe commun n'est requis entre la requête et le résultat.
-
-Les *embeddings* sont des vecteurs de **768 dimensions** (`GEMINI_EMBEDDING_MODEL` / `.env.example`).
-
----
-
-## Le rôle de l'IA — et ce qu'elle n'a PAS le droit de faire
-
-C'est la distinction la plus importante du dépôt.
-
-### Séparation des pouvoirs (langage officiel de l'architecture)
-
-**FACT :** En-tête de `lib/ai/connection-discovery.ts` :
-
-> *Candidate discovery … the "data discovers" half of the separation of powers … The AI never invents these refs; it only selects among them and explains why.*
-
-**FACT :** En-tête de `lib/ai/connection-generator.ts` :
-
-> *generateGroundedConnections — the preferred "AI articulates" half … Receives REAL candidate verses … asks the model only to SELECT among them and explain why. Returned refs are validated against the candidate set, so the model cannot introduce a verse that wasn't discovered.*
+## 2. Le parcours principal de l’utilisateur
 
 ```mermaid
 flowchart TB
-  subgraph deterministic ["Déterministe / canonique (ancres de confiance)"]
-    V[Corpus Coran + limites isValidRef]
-    M[Morphologie arabe / racines partagées]
-    E[Embeddings de versets + voisins pgvector]
-  end
+  A["Chercher un verset"]
+  B["L’ajouter au canvas"]
+  C["Choisir un type de connexion"]
+  D["Voir les versets liés"]
+  E["Lire l’explication"]
 
-  subgraph probabilistic ["Probabiliste (langage seulement)"]
-    AI[Claude / Gemini]
-  end
-
-  V --> Discover[discoverCandidates]
-  M --> Discover
-  E --> Discover
-  Discover -->|refs candidates seulement| AI
-  AI -->|JSON: ref + reason| Validate[Parser + valider refs]
-  V --> Validate
-  Validate --> Graph[(table connections / liens canvas)]
+  A --> B
+  B --> C
+  C --> D
+  D --> E
+  E --> B
 ```
 
-### Trois couches de « ce qui est autorisé sur le canvas »
+### Lecture à voix haute — suivez le diagramme
 
-| Couche | Mécanisme | Source **FACT** |
-| --- | --- | --- |
-| **1. Préféré (ancré)** | La découverte donne des refs candidates → l'IA choisit un sous-ensemble + écrit des raisons → les refs de sortie doivent être ∈ ensemble candidat | `generateGroundedConnections`, `allowed.has(c.ref)` |
-| **2. Secours (legacy)** | Si pas de données d'ancrage, l'IA propose des refs de mémoire → chaque ref doit passer `isValidRef` + exister dans le **corpus local** via `getVerses` | `generateConnections` |
-| **3. Persistance post-génération** | Les lignes canoniques anglaises sont stockées dans Postgres ; les locales non-anglaises traduisent les raisons, pas re-sélectionnent les versets | `graph-service.ts` |
+Commencez en haut du diagramme.
 
-**FACT :** Le chemin legacy **ne peut pas persister des refs hallucinées** — `generateConnections` hydrate depuis le corpus local seulement ; les lignes de corpus manquantes sont supprimées.
+D’abord, l’utilisateur cherche un verset. Suivez la première flèche vers le bas. Le verset arrive sur le canvas.
 
-**FACT :** Le chemin ancré est plus strict — une ref absente de la liste de découverte est filtrée même si valide dans le corpus.
+Continuez avec la flèche suivante. L’utilisateur choisit un type de connexion : un thème, une racine arabe ou un contraste.
 
-### Ce que le LLM a le droit de générer
+Descendez encore. Le système montre des versets liés au premier verset.
 
-**FACT :** Pour les connexions, le modèle produit du JSON comme `{ "ref": "surah:ayah", "reason": "…" }` — la **`reason`** est le contenu génératif principal ; la **`ref`** est contrainte.
+La dernière flèche mène vers l’explication. L’utilisateur lit pourquoi les versets sont connectés.
 
-**FACT :** Les prompts incluent le cadre Maturidi/Hanafi et ajoutent `TANZIH_CONSTRAINT` via `tanzihDirective()` — les admins ne peuvent pas retirer le Tanzih en modifiant les templates seuls (`connection-generator.ts` commentaires).
+Regardez maintenant la flèche qui retourne vers le canvas. Après avoir lu l’explication, l’utilisateur peut ajouter un autre verset et continuer son exploration.
 
-**FACT :** Fournisseur IA : Anthropic Claude (principal) avec secours Gemini ; *embeddings* toujours Gemini (`.env.example`, README).
+Le parcours forme donc une boucle : chercher, ajouter, choisir, voir, comprendre, puis continuer.
 
-### Ce que le LLM ne doit PAS faire (par conception)
 
-| Interdit | Application |
-| --- | --- |
-| Inventer des références de versets (chemin ancré) | Appartenance à l'ensemble candidat |
-| Inventer des références (chemin legacy) | `isValidRef` + hydratation corpus local |
-| Choisir des versets du corpus sans découverte (ancré) | Prompt de sélection : *« Choose ONLY from the candidate references listed above »* |
-| Dérive théologique silencieuse | Contrainte Tanzih + revue/divulgation pour changements de prompts (`AGENTS.md`) |
-| Passer pour un verset | Règles de design UI (`DESIGN.md`) |
+### Étape 1 — Chercher un verset
 
-**À COMPRENDRE MAINTENANT :** **Les données découvrent ; l'IA articule.** La crédibilité du produit repose sur cet ordre.
+**FACT :** L’utilisateur peut chercher avec :
 
----
+* une référence, par exemple `2:255` ;
+* un mot-clé ;
+* une phrase qui décrit une idée.
 
-## Modèle de confiance central — canonique vs généré
+Par exemple :
 
-Utilisez ce tableau comme liste mentale par défaut en lisant une fonctionnalité :
+> gratitude pendant une période difficile
 
-| Préoccupation | Ancré / déterministe | Généré / probabiliste |
-| --- | --- | --- |
-| Ce ayah existe-t-il ? | `isValidRef`, limites de longueur de sourate, ligne corpus | — |
-| Texte arabe & traduction principale | Table `verses` ; `en.sahih` (Saheeh International) | — |
-| Quels versets peuvent se connecter ? | Racines partagées (`word_morphology`), voisins d'embedding (`verse_embeddings`) | — |
-| Quels candidats deviennent des liens ? | Ancré : l'IA choisit dans la liste ; Legacy : l'IA propose, le corpus filtre | Choix de sélection |
-| Pourquoi sont-ils connectés ? | — | `reason` générée par l'IA (forme JSON validée) |
-| Texte de raison non-anglais | La ligne canonique anglaise est la source de vérité | Traduction des raisons (`translateReason`) |
-| Noms divins / réflexions | Chaînes anglaises canoniques + données structurées | Réflexions IA avec prompts séparés (`app/api/names/...`) |
+La recherche par le sens s’appelle la **recherche sémantique**.
 
-### Validation des références de versets (niveau élevé)
+### Étape 2 — Ajouter le verset au canvas
 
-**FACT :** `lib/quran/quran-corpus.ts` — `isValidRef` vérifie :
+Le *canvas* est une grande surface de travail.
 
-- Format `surah:ayah` (orthographe canonique — `"02:255"` rejeté)
-- Sourate 1–114, ayah dans les comptes Hafs/Uthmani par sourate (`"1:8"` rejeté)
+Chaque verset apparaît comme un **nœud**. Un nœud est simplement un élément placé sur le canvas.
 
-**FACT :** `lib/quran/verse-resolver.ts` — corpus local d'abord ; requête alquran.cloud en secours ; retourne `null` si introuvable — aussi une barrière anti-hallucination.
+L’utilisateur peut déplacer les nœuds et organiser son étude.
 
-**FACT :** `AGENTS.md` — ne jamais fabriquer de références du Coran ; ne jamais assouplir la validation pour faire passer des tests.
+### Étape 3 — Choisir une connexion
 
----
+L’utilisateur peut demander trois types de connexions :
 
-## Pourquoi cette frontière est fondamentale
+1. un thème ;
+2. une racine arabe ;
+3. un contraste.
 
-**INFERENCE :** Pour un texte sacré, le coût d'une mauvaise référence d'ayah n'est pas un bug d'interface — c'est un **échec de confiance et d'intégrité théologique**. Les utilisateurs peuvent traiter les connexions affichées comme un guide savant.
+### Étape 4 — Voir les versets liés
 
-Donc OpenHikmah optimise pour :
+Le système cherche des versets qui peuvent avoir une relation avec le premier verset.
 
-1. **Intégrité référentielle** — les ayahs sont réels et soutenus par le corpus avant d'apparaître.
-2. **Explicabilité** — chaque lien a une raison énoncée (README produit : *« Every edge on the canvas links to that explanation »*).
-3. **Auditabilité** — générations enregistrées dans `ai_generations` ; connexions persistées (`connection-generator.ts`, `graph-service.ts`).
-4. **Révisabilité** — changements de prompts/théologie exigent une divulgation explicite du contributeur (`CONTRIBUTING.md`, référence template PR).
+Il utilise des données du Coran avant de demander une explication à l’IA.
 
-Comparaison avec le modèle mental Firebase/Firestore que vous connaissez peut-être :
+### Étape 5 — Lire l’explication
 
-- **Firestore :** vous faites confiance aux IDs de documents parce que *votre app les a écrits*.
-- **OpenHikmah :** vous faites confiance aux cibles de liens parce que *des pipelines déterministes et la validation du corpus les ont admises* — le LLM est plus comme un commentateur limité à une liste de lecture fournie.
+L’IA écrit une courte raison pour expliquer la connexion.
+
+L’utilisateur peut ensuite continuer son exploration et ajouter d’autres versets au canvas.
 
 ---
 
-## Contexte technique (seulement ce qui façonne le produit)
+## 3. Les trois types de connexions
 
-**FACT (README Tech Stack) :**
+**FACT :** Le fichier `types/quran.ts` définit trois types principaux.
 
-| Préoccupation | Choix |
-| --- | --- |
-| App | Next.js **16** App Router, React 19, TypeScript strict |
-| État canvas | Zustand + `@xyflow/react` |
-| Base de données | PostgreSQL + pgvector + Drizzle ORM |
-| Auth | Quran Foundation OAuth2 PKCE |
-| IA | Claude (+ secours Gemini) ; *embeddings* Gemini |
+| Type dans le code | Nom simple | Signification                                                  |
+| ----------------- | ---------- | -------------------------------------------------------------- |
+| `thematic`        | Thème      | Deux versets parlent d’un thème théologique commun.            |
+| `root`            | Racine     | Deux versets utilisent des mots avec une racine arabe commune. |
+| `contrast`        | Contraste  | Deux versets présentent des idées théologiques opposées.       |
 
-**UNKNOWN (pour les phases suivantes) :** Les patterns exacts de Next.js 16 App Router ici vs anciennes suppositions Next — le dépôt dit de lire `node_modules/next/dist/docs/` avant de coder.
+### Exemple de thème
 
----
+Deux versets peuvent parler de la patience, même s’ils n’utilisent pas exactement les mêmes mots.
 
-## Phase 1 — Ce qu'il faut retenir
+### Exemple de racine
 
-### À COMPRENDRE MAINTENANT (5 points)
+Deux mots arabes peuvent venir de la même racine.
 
-1. OpenHikmah est un **graphe de connaissances du Coran ancré** avec un canvas infini — pas un chatbot Coran libre.
-2. **Trois modes de connexion :** thème, racine, contraste — chacun avec des rails de découverte déterministes.
-3. **Séparation des pouvoirs :** morphologie + embeddings **découvrent** les versets candidats ; l'IA **sélectionne (quand ancré) et explique**.
-4. **La validation est en couches :** syntaxe/limites → existence corpus → (ancré) appartenance à l'ensemble candidat.
-5. **Les contraintes théologiques sont des exigences produit**, encodées dans les prompts (`TANZIH_CONSTRAINT`) et les règles contributeur (`AGENTS.md`).
+Cette racine commune peut montrer une relation linguistique entre deux versets.
 
-### UTILE PLUS TARD
+### Exemple de contraste
 
-- Social, espaces de travail, audio, Noms divins, Récits prophétiques, boucle admin de remplissage.
-- Cache Redis d'embeddings, limites de débit, déduplication single-flight.
-- Pipeline de localisation (graphe canonique anglais, raisons traduites).
+Un verset peut parler de gratitude. Un autre peut parler d’ingratitude.
 
-### IGNORER POUR L'INSTANT
-
-- Détails d'implémentation du flux de tokens PKCE.
-- Visite champ par champ du schéma Drizzle.
-- Organisation des tests E2E.
+Les deux versets sont différents, mais leur opposition peut aider l’utilisateur à mieux comprendre le thème.
 
 ---
 
-## Incertitudes (lacunes honnêtes après la Phase 1)
+## 4. Quelle est la différence entre le graphe et le canvas ?
 
-| Sujet | Statut |
-| --- | --- |
-| Quelle part du corpus est pré-remplie vs récupérée en direct dans un setup dev frais | **UNKNOWN** — dépend des scripts seed/migrate (Phase 10) |
-| Fréquence du chemin legacy vs ancré en production | **INFERENCE :** ancré préféré quand morphologie/embeddings existent ; legacy seulement en cas d'absence |
-| Texte UX exact pour les modes d'expansion sur le canvas | **UNKNOWN** — besoin d'inspection UI (Phase 11) |
-| La découverte contraste utilise-t-elle des vecteurs séparés ou les mêmes voisins que le thème | **FACT :** mêmes voisins sémantiques ; l'IA sélectionne les opposés (`connection-discovery.ts` commentaire) |
+Cette différence est importante.
+
+### Le graphe de connaissances
+
+**FACT :** OpenHikmah possède un graphe de connaissances persistant dans PostgreSQL.
+
+Le graphe indique :
+
+* quel verset est connecté à un autre verset ;
+* le type de connexion ;
+* la raison de la connexion.
+
+Le graphe représente donc les connexions enregistrées par le système.
+
+### Le canvas
+
+Le canvas est la vue de l’utilisateur.
+
+Il montre :
+
+* les versets placés comme des nœuds ;
+* les connexions entre les versets ;
+* la position des éléments ;
+* la partie du graphe que l’utilisateur veut étudier.
+
+**FACT :** OpenHikmah utilise `@xyflow/react` pour le canvas.
+
+**FACT :** Un canvas peut être partagé avec une URL.
+
+### Modèle mental simple
+
+> Le graphe contient les connexions.
+> Le canvas montre une vue de ces connexions.
+
+Le graphe est la connaissance enregistrée. Le canvas est l’espace de travail de l’utilisateur.
 
 ---
 
-## Et ensuite
+## 5. Que signifie « IA ancrée » ?
 
-**Phase 2 — Introduction au domaine :** modèle sourate/ayah, tables de morphologie, requêtes embeddings/pgvector, persistance graphe vs canvas — chaque point lié à des fichiers concrets.
+Le dépôt utilise le mot anglais *grounded*.
 
-**Phase 3 — Frontières théologiques et données sacrées :** carte complète où vivent les contraintes (tests, prompts, règles de revue).
+Dans ce document, nous utilisons le mot **ancrée**.
 
-Quand vous êtes prêt, dites **« continue vers la Phase 2 »** ou posez des questions sur la Phase 1.
+Une IA ancrée reçoit des données précises avant de produire une réponse.
 
-> **Version complète (français B2+) :** [Phase 1](../onboarding-fr/phase-1-what-is-openhikmah.md)
+Dans OpenHikmah, l’IA ne doit pas chercher seule des références du Coran dans sa mémoire.
+
+Le système utilise d’abord trois sources importantes :
+
+1. le corpus du Coran ;
+2. les racines arabes ;
+3. les embeddings.
+
+### Le corpus
+
+Le corpus contient les versets et leurs références.
+
+Le système l’utilise pour vérifier qu’un verset existe vraiment.
+
+### Les racines arabes
+
+Les données de morphologie montrent les racines des mots arabes.
+
+Elles peuvent aider le système à trouver des versets avec une racine commune.
+
+### Les embeddings
+
+Un *embedding* est une représentation numérique du sens d’un texte.
+
+Le système compare le sens de la recherche avec le sens des versets.
+
+Cela permet de trouver un verset même quand les mots exacts sont différents.
+
+Vous n’avez pas encore besoin de comprendre le calcul des embeddings. Pour la Phase 1, il suffit de retenir qu’ils aident le système à chercher par le sens.
 
 ---
 
-## Sources clés du dépôt pour cette phase
+## 6. La règle principale : les données découvrent, l’IA explique
 
-| Source | Rôle |
-| --- | --- |
-| `README.md` | Présentation produit, fonctionnalités, stack |
-| `CONTRIBUTING.md` | « Outil de compréhension théologique » ; attentes contributeur |
-| `AGENTS.md` | Standards théologiques, attribution IA |
-| `DESIGN.md` | Présentation texte sacré vs texte IA |
-| `lib/ai/connection-discovery.ts` | « Les données découvrent » |
-| `lib/ai/connection-generator.ts` | « L'IA articule » ; validation |
-| `lib/ai/graph-service.ts` | Graphe persistant + génération sur cache miss |
-| `lib/quran/quran-corpus.ts` | `isValidRef`, corpus local |
-| `lib/quran/semantic-search.ts` | Rôle de la récupération sémantique |
-| `types/quran.ts` | Types de liens, types canvas |
+C’est l’idée la plus importante de la Phase 1.
+
+> **Les données découvrent. L’IA explique.**
+
+**FACT :** `lib/ai/connection-discovery.ts` cherche des versets candidats avec les données disponibles.
+
+**FACT :** `lib/ai/connection-generator.ts` reçoit ces candidats.
+
+Dans le chemin ancré, l’IA peut :
+
+* choisir des versets dans la liste des candidats ;
+* écrire une raison pour chaque connexion.
+
+Elle ne peut pas ajouter librement un autre verset.
+
+```mermaid
+flowchart TB
+  A["Corpus, racines et embeddings"]
+  B["Versets candidats"]
+  C["L’IA choisit dans la liste"]
+  D["L’IA explique le lien"]
+  E["Le système valide le résultat"]
+
+  A --> B
+  B --> C
+  C --> D
+  D --> E
+```
+
+### Lecture à voix haute — suivez le diagramme
+
+Commencez en haut du diagramme.
+
+La première boîte contient les sources fiables : le corpus du Coran, les racines arabes et les embeddings.
+
+Suivez la première flèche vers le bas. Ces données permettent au système de trouver une liste de versets candidats.
+
+Continuez vers la boîte suivante. L’IA reçoit cette liste et choisit seulement parmi les candidats autorisés.
+
+Suivez encore la flèche. L’IA écrit une explication pour dire pourquoi les versets sont liés.
+
+Enfin, regardez la dernière boîte. Le système valide le résultat avant de l’utiliser.
+
+Le mouvement du diagramme montre donc une règle importante : les données passent en premier, l’IA intervient ensuite, puis le système vérifie le résultat.
+
+
+Cette séparation réduit le risque d’hallucination.
+
+Une **hallucination** arrive quand une IA produit une information fausse comme si elle était vraie.
+
+---
+
+## 7. Ce que l’IA peut faire
+
+**FACT :** Pour les connexions, l’IA peut principalement :
+
+* choisir certains versets parmi les candidats autorisés ;
+* écrire la raison de la connexion ;
+* traduire une raison dans une autre langue.
+
+Une réponse technique peut contenir des données comme :
+
+```json
+{
+  "ref": "2:255",
+  "reason": "Explication de la connexion"
+}
+```
+
+La valeur `ref` représente la référence du verset.
+
+La valeur `reason` contient l’explication écrite par l’IA.
+
+La référence est contrôlée. L’explication est le contenu principalement généré par l’IA.
+
+---
+
+## 8. Ce que l’IA ne doit pas faire
+
+L’IA ne doit pas :
+
+* inventer une référence du Coran ;
+* choisir librement un verset qui n’est pas dans la liste des candidats du chemin ancré ;
+* présenter son propre texte comme un verset ;
+* changer silencieusement le cadre théologique du produit.
+
+**FACT :** La fonction `isValidRef` vérifie le format et les limites d’une référence.
+
+Par exemple :
+
+* `2:255` utilise le bon format ;
+* `02:255` est refusé ;
+* une référence vers un ayah qui n’existe pas est refusée.
+
+**FACT :** Le système vérifie aussi l’existence du verset dans le corpus.
+
+**FACT :** `AGENTS.md` dit qu’un contributeur ne doit jamais :
+
+* fabriquer une référence du Coran ;
+* rendre la validation moins stricte seulement pour faire passer un test.
+
+---
+
+## 9. Pourquoi cette validation est-elle importante ?
+
+**INFERENCE :** Une mauvaise référence du Coran n’est pas seulement un bug technique.
+
+Elle peut créer un problème de confiance et d’intégrité théologique.
+
+Un utilisateur peut penser que la connexion affichée est fiable. Le produit doit donc vérifier les références avant de les montrer.
+
+OpenHikmah cherche quatre qualités principales :
+
+### Des références correctes
+
+Le verset doit exister dans le corpus.
+
+### Une explication visible
+
+Chaque connexion doit avoir une raison.
+
+### Une différence claire entre le Coran et l’IA
+
+Le texte du Coran et le texte généré ne doivent pas avoir la même apparence.
+
+### La possibilité de vérifier le système
+
+Les développeurs doivent pouvoir examiner les connexions et les générations enregistrées.
+
+---
+
+## 10. Les règles théologiques
+
+**FACT :** `CONTRIBUTING.md` décrit OpenHikmah comme un outil de compréhension théologique du Coran.
+
+**FACT :** `AGENTS.md` demande que les prompts et les connexions respectent le cadre **maturidite et hanafite**.
+
+Le dépôt impose aussi un **Tanzih strict**.
+
+Ici, le Tanzih signifie qu’il ne faut jamais suggérer que les attributs divins ont :
+
+* une forme physique ;
+* une position dans un lieu ;
+* une ressemblance avec la création.
+
+Ces règles ne sont pas seulement des préférences personnelles. Elles font partie des exigences du produit.
+
+Un changement de prompt peut modifier les explications produites par l’IA. Un contributeur doit donc déclarer clairement les changements qui peuvent avoir un effet théologique.
+
+---
+
+## 11. Le texte du Coran et le texte de l’IA
+
+**FACT :** `DESIGN.md` demande une différence visuelle claire entre :
+
+* le texte canonique du Coran ;
+* une explication écrite par l’IA.
+
+Une explication de l’IA ressemble à une note éditoriale.
+
+Elle ne doit jamais ressembler à un verset.
+
+Cette règle aide l’utilisateur à comprendre immédiatement :
+
+> Ceci est le texte du Coran.
+> Ceci est une explication générée par l’IA.
+
+---
+
+## 12. Une comparaison avec Firestore
+
+Voici une comparaison avec une technologie que vous connaissez déjà.
+
+Dans Firestore, vous faites confiance à un document parce que votre application l’a créé et enregistré.
+
+Dans OpenHikmah, vous faites confiance à une référence parce que :
+
+1. le système l’a découverte avec des données ;
+2. la validation a accepté son format ;
+3. le corpus confirme que le verset existe.
+
+Le LLM ressemble à un commentateur.
+
+Il reçoit une liste autorisée. Il explique les éléments de cette liste, mais il ne doit pas créer librement de nouvelles références.
+
+---
+
+## 13. Le contexte technique minimum
+
+**FACT :** Le `README.md` présente cette stack technique :
+
+| Partie                    | Technologie                                   |
+| ------------------------- | --------------------------------------------- |
+| Application               | Next.js 16, React 19 et TypeScript strict     |
+| Canvas et état            | `@xyflow/react` et Zustand                    |
+| Base de données           | PostgreSQL, pgvector et Drizzle ORM           |
+| Authentification          | Quran Foundation OAuth2 PKCE                  |
+| Intelligence artificielle | Claude, avec Gemini comme solution de secours |
+| Embeddings                | Gemini                                        |
+
+Vous n’avez pas encore besoin de comprendre chaque technologie en détail.
+
+Pour la Phase 1, retenez seulement ceci :
+
+* React et Next.js construisent l’application ;
+* Zustand gère l’état du canvas ;
+* PostgreSQL garde les données ;
+* pgvector aide à chercher par le sens ;
+* Claude et Gemini produisent certaines explications ;
+* le corpus et la validation protègent les références.
+
+---
+
+## 14. Les cinq idées à retenir
+
+1. **OpenHikmah est une carte interactive pour étudier les connexions entre les versets.**
+
+2. **Il existe trois types de connexions : thème, racine et contraste.**
+
+3. **Le graphe contient les connexions enregistrées. Le canvas montre la vue de l’utilisateur.**
+
+4. **Les données découvrent les versets candidats. L’IA choisit dans la liste et explique les connexions.**
+
+5. **Les règles de validation et les règles théologiques font partie du fonctionnement du produit.**
+
+---
+
+## 15. Vocabulaire essentiel
+
+| Mot                      | Explication simple                                                   |
+| ------------------------ | -------------------------------------------------------------------- |
+| **graphe**               | Un ensemble d’éléments et de connexions                              |
+| **nœud**                 | Un élément du graphe ; ici, souvent un verset                        |
+| **connexion**            | Un lien entre deux versets                                           |
+| **canvas**               | La surface de travail où l’utilisateur organise les versets          |
+| **ancré / grounded**     | Contrôlé ou soutenu par des données précises                         |
+| **corpus**               | La collection de versets utilisée par le système                     |
+| **morphologie**          | L’étude de la structure des mots                                     |
+| **racine**               | La base commune de plusieurs mots arabes                             |
+| **embedding**            | Une représentation numérique du sens                                 |
+| **recherche sémantique** | Une recherche par le sens, et pas seulement par les mots exacts      |
+| **déterministe**         | Produit par des données ou des règles précises                       |
+| **probabiliste**         | Produit avec une estimation ; le résultat peut varier                |
+| **hallucination**        | Une information fausse créée par une IA                              |
+| **LLM**                  | Le modèle d’IA qui lit et produit du texte                           |
+| **Tanzih**               | Le principe qui refuse toute ressemblance entre Allah et la création |
+
+---
+
+## 16. Fichiers importants pour vérifier cette phase
+
+Vous n’avez pas besoin de lire tous ces fichiers maintenant. Cette liste permet seulement de retrouver les sources.
+
+| Fichier                          | Ce qu’il montre                                            |
+| -------------------------------- | ---------------------------------------------------------- |
+| `README.md`                      | Le produit, ses fonctions et sa stack                      |
+| `CONTRIBUTING.md`                | Le but théologique et les règles pour contribuer           |
+| `AGENTS.md`                      | Les règles théologiques et les protections concernant l’IA |
+| `DESIGN.md`                      | La différence visuelle entre le Coran et le texte de l’IA  |
+| `types/quran.ts`                 | Les trois types de connexions                              |
+| `lib/ai/connection-discovery.ts` | Comment les données trouvent les candidats                 |
+| `lib/ai/connection-generator.ts` | Comment l’IA choisit et explique                           |
+| `lib/quran/quran-corpus.ts`      | Comment les références sont validées                       |
+| `lib/quran/semantic-search.ts`   | Comment le système cherche par le sens                     |
+| `lib/ai/graph-service.ts`        | Comment les connexions du graphe sont enregistrées         |
